@@ -1,0 +1,18 @@
+opencv-contrib-python  # Additional OpenCV modules for object tracking
+tqdm  # For progress bar
+opencv-python
+opencv-contrib-python
+ultralytics
+progressbar2
+numpy
+matplotlib  # Optional for visualizing data and graphs
+scikit-image
+pytracking  # Optional, only if you need advanced tracking algorithms
+torchreid
+numpy
+torch
+deep-sort-realtime
+gdown
+tensorboard
+#python -m venv yolov8_env
+#yolov8_env\Scripts\activate
