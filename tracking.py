@@ -64,6 +64,7 @@ def process_each_frame(frame, yolo_model, reid_model):
 
     # Initialize a dictionary to keep track of counts for each class
     class_count = {}
+    track_id_class_map = {}  # Maps track IDs to their class names for unique counting
 
     results = yolo_model(frame)
 
@@ -110,11 +111,13 @@ def process_each_frame(frame, yolo_model, reid_model):
         class_index = int(bbs[tracked_objects.index(obj)][2])  # Use the tracked object index to get the class index
         class_name = CLASS_NAMES[class_index]  # Get the class name using the class index
 
-        # Update the count for this class
-        if class_name in class_count:
-            class_count[class_name] += 1
-        else:
-            class_count[class_name] = 1
+        # Only update the count if this track ID is new for the class
+        if track_id not in track_id_class_map:
+            track_id_class_map[track_id] = class_name  # Map track ID to class name
+            if class_name in class_count:
+                class_count[class_name] += 1  # Increment unique count
+            else:
+                class_count[class_name] = 1  # Initialize count
 
         # Draw bounding box and class name with count
         cv2.rectangle(frame, top_left, bottom_right, (0, 255, 0), 2)
