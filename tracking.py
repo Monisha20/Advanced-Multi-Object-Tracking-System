@@ -9,39 +9,23 @@ from PIL import Image
 from deep_sort_realtime.deepsort_tracker import DeepSort
 from ultralytics import YOLO
 
-# Define YOLOv8 class names
-CLASS_NAMES = [
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", 
-    "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", 
-    "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", 
-    "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", 
-    "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", 
-    "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", 
-    "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", 
-    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", 
-    "potted plant", "bed", "dining table", "toilet", "TV", "laptop", "mouse", 
-    "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", 
-    "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair dryer", 
-    "toothbrush"
-]
-
-# Function to load pretrained yolo model
+#Function to load pretrained yolo model
 def load_yolo_model():
-    # loading pretrained model
+    #loading pretrained model
     yolo_model = YOLO('yolov8n.pt')
     return yolo_model
 
-# Function to load pretrained reid model
+#Function to load pretrained reid model
 def load_reid_model():
     reid_model = torchreid.models.build_model(
-        name='osnet_x1_0',
+        name='resnet50',
         num_classes=1000,
         pretrained=True
     )
     reid_model.eval()
     return reid_model
 
-# Function to extract feature for re-identification
+#Fucntion to extract feature for re identification
 def extract_features(reid_model, cropped_img):
     transform = t.Compose([
         t.Resize((256, 128)),
@@ -54,40 +38,54 @@ def extract_features(reid_model, cropped_img):
         features = reid_model(img_tensor)
     return features.numpy().flatten()
 
-# Implementing tracking algorithm
-def process_each_frame(frame, yolo_model, reid_model):
+#Implementing tracking algorithm
+def process_each_frame(frame, previous_features):
+
     features_list = []
     bbs = []
 
-    # Initialize tracker 
+    yolo_model = load_yolo_model()
+    reid_model = load_reid_model()
+
+    if yolo_model is None or reid_model is None:
+        print("Error in loading the model")
+        return
+
+    # YOLOv8 class names
+    class_names = [
+        "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", 
+        "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", 
+        "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", 
+        "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", 
+        "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", 
+        "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", 
+        "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", 
+        "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", 
+        "potted plant", "bed", "dining table", "toilet", "TV", "laptop", "mouse", 
+        "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", 
+        "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair dryer", 
+        "toothbrush"
+    ]
+
+    #initialize tracker 
     tracker = DeepSort(max_age=30, n_init=3, nms_max_overlap=1.0)
 
-    # Initialize a dictionary to keep track of counts for each class
-    class_count = {}
-    track_id_class_map = {}  # Maps track IDs to their class names for unique counting
-
     results = yolo_model(frame)
-
-    # Set a confidence threshold
-    confidence_threshold = 0.5
 
     for result in results:
         boxes = result.boxes
         for box in boxes:
-            conf = box.conf[0]
-            if conf < confidence_threshold:
-                continue  # Skip low-confidence detections
-
             x1, y1, x2, y2 = box.xyxy[0]
+            conf = box.conf[0]
             cls = int(box.cls[0])
+            
+            x1 = int(np.round(x1))
+            y1 = int(np.round(y1))
+            x2 = int(np.round(x2))
+            y2 = int(np.round(y2))
 
-            # Debugging: Print detected class index and name
-            print(f"Detected class index: {cls}, name: {CLASS_NAMES[cls]}")
-
-            # Convert to integer pixel values
-            x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
             cropped_img = frame[y1:y2, x1:x2]
-
+            
             width = x2 - x1
             height = y2 - y1
 
@@ -97,44 +95,48 @@ def process_each_frame(frame, yolo_model, reid_model):
             # Extract re-ID features
             features = extract_features(reid_model, cropped_img)
             features_list.append(features)
-
-    # Update tracker with detections and re-ID features
+    
+    # Update tracker with detections
     tracked_objects = tracker.update_tracks(bbs, [conf for _, conf, _ in bbs], [cls for _, _, cls in bbs], frame, features_list)
 
     for obj in tracked_objects:
         bbox = obj.to_tlbr()
-        track_id = obj.track_id
+        track_id = int(obj.track_id)
         top_left = (int(bbox[0]), int(bbox[1]))
         bottom_right = (int(bbox[2]), int(bbox[3]))
-        
-        # Get the class index and name
-        class_index = int(bbs[tracked_objects.index(obj)][2])  # Use the tracked object index to get the class index
-        class_name = CLASS_NAMES[class_index]  # Get the class name using the class index
+        class_index = int(bbs[tracked_objects.index(obj)][2])
+        class_name = class_names[class_index]
 
-        # Only update the count if this track ID is new for the class
-        if track_id not in track_id_class_map:
-            track_id_class_map[track_id] = class_name  # Map track ID to class name
-            if class_name in class_count:
-                class_count[class_name] += 1  # Increment unique count
-            else:
-                class_count[class_name] = 1  # Initialize count
+        if track_id < len(features_list):
+            current_features = features_list[track_id]
+            previous_features[track_id] = current_features
 
-        # Draw bounding box and class name with count
-        cv2.rectangle(frame, top_left, bottom_right, (0, 255, 0), 2)
-        cv2.putText(frame, f"{class_name} {class_count[class_name]}: {track_id}", 
-                    (top_left[0], top_left[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+        draw_bounding_box(frame, top_left, bottom_right, class_name, track_id)
 
-    return frame
+    return frame, previous_features
 
-# function to perform object identification - feature extraction - tracking for the input video source
+
+def draw_bounding_box(frame, top_left, bottom_right, class_name, track_id):
+    # Create the label
+    label = f"{class_name} ID: {track_id}"
+
+    # Draw the rectangle around the detected object
+    cv2.rectangle(frame, top_left, bottom_right, (0, 255, 0), 2)
+
+    # Calculate the position for the label
+    text_position = (top_left[0], top_left[1] - 10)
+
+    # Draw the label with a different background for better visibility
+    text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
+    cv2.rectangle(frame, (top_left[0], top_left[1] - text_size[1] - 5),
+                  (top_left[0] + text_size[0], top_left[1]), (0, 255, 0), -1)  # Filled rectangle for label background
+    cv2.putText(frame, label, text_position, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)  # White text
+
+#function to perform object identification - feature extraction - tracking for the input video source
 def mot_with_reid(video_source=0):
     
-    yolo_model = load_yolo_model()
-    reid_model = load_reid_model()
+    previous_features = {}
 
-    if yolo_model is None or reid_model is None:
-        print("Error in loading the model")
-        return
     # Capture video from the webcam
     cap = cv2.VideoCapture(video_source)
 
@@ -156,8 +158,7 @@ def mot_with_reid(video_source=0):
                 print("End of video or error reading frame")
                 break
 
-            # Pass the models directly into the function
-            processed_frame = process_each_frame(frame, yolo_model, reid_model)
+            processed_frame, previous_features = process_each_frame(frame, previous_features)
 
             cv2.imshow('Live Object Detection - One Frame', processed_frame)
             key = cv2.waitKey(1)
@@ -173,7 +174,7 @@ def mot_with_reid(video_source=0):
                     print("End of video or error reading frame")
                     break
 
-                processed_frame = process_each_frame(frame, yolo_model, reid_model)
+                processed_frame, previous_features = process_each_frame(frame, previous_features)
                 cv2.imshow('Live Object Detection - Live Video', processed_frame)
 
                 key = cv2.waitKey(1)
@@ -193,14 +194,6 @@ def main():
         print("3. Exit")
         choice = input("Enter your choice (1-4): ")
 
-        """
-        if choice == '1':
-            input_directory = input("Enter the path to the image directory: ")
-            if os.path.isdir(input_directory):
-                mot_with_reid(input_directory)
-            else:
-                print("Invalid directory. Please try again.")
-        """
         if choice == '1':
             print("\n Enter the path to the video file: ")
             video_file = input().strip()
