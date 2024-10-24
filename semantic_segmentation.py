@@ -15,7 +15,7 @@ def decode_segmentation(segmentation_map):
     rgb_image = np.stack([r, g, b], axis=2)
     return rgb_image
 
-def add_labels_to_frame(segmentation_map, frame, original_frame_shape):
+def add_labels_to_frame(segmentation_map, frame):
 
     CLASS_NAMES =[
         "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", 
@@ -31,24 +31,23 @@ def add_labels_to_frame(segmentation_map, frame, original_frame_shape):
         "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair dryer", 
         "toothbrush"
     ]
-    unique_classes = np.unique(segmentation_map)  # Find all the classes present in the frame
-    scale_x = original_frame_shape[1] / segmentation_map.shape[1]
-    scale_y = original_frame_shape[0] / segmentation_map.shape[0]
 
+    unique_classes = np.unique(segmentation_map)  # Find all the classes present in the frame
     for cls in unique_classes:
         if cls == 0:
-            continue
+            continue  # Skip background
+        # Get the mask for the current class
         mask = (segmentation_map == cls)
         
+        # Find the centroid of the class mask to place the label
         y, x = np.where(mask)
         if len(x) > 0 and len(y) > 0:
             centroid_x, centroid_y = np.mean(x), np.mean(y)
             label = CLASS_NAMES[cls]
             
-            label_x = int(centroid_x * scale_x)
-            label_y = int(centroid_y * scale_y)
+            # Overlay the label at the centroid
             
-            cv2.putText(frame, label, (label_x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(frame, label, (int(centroid_x), int(centroid_y)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     
     return frame
 
@@ -67,40 +66,34 @@ def process_image_for_segmentation_and_detection(image_file):
     cv2.destroyAllWindows()
 
 def process_each_frame(frame):
-
     model = models.segmentation.deeplabv3_resnet101(pretrained=True).eval()
 
     preprocess = transforms.Compose([
-    transforms.ToPILImage(),  
-    transforms.Resize((520, 520)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize as per model requirements
+        transforms.ToPILImage(),  
+        transforms.Resize((520, 520)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    original_frame_shape = frame.shape
+    input_tensor = preprocess(frame).unsqueeze(0)  # Add batch dimension
 
-    resized_frame = cv2.resize(frame, (520, 520))
-
-    input_tensor = preprocess(frame).unsqueeze(0)
-
+    # Perform inference (disable gradient calculation)
     with torch.no_grad():
         output = model(input_tensor)['out'][0]
     
-    output_predictions = output.argmax(0).numpy()
+    # Get the predicted class for each pixel
+    output_predictions = output.argmax(0).cpu().numpy()
 
+    # Decode the segmentation result into an RGB image
     decoded_segmentation = decode_segmentation(output_predictions)
 
-    decoded_segmentation_resized = cv2.resize(decoded_segmentation, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
+    # Add class labels on the frame
+    labeled_frame = add_labels_to_frame(output_predictions, decoded_segmentation)
 
-    mask = output_predictions != 0
-
-    mask_resized = cv2.resize(mask.astype(np.uint8), (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
-
-    frame[mask_resized == 1] = decoded_segmentation_resized[mask_resized == 1]  # Overlay only on the detected objects
-
-    labeled_frame = add_labels_to_frame(output_predictions, frame, original_frame_shape)
-
+    # Write the frame with segmentation and labels into the output video
+    cv2.imshow('Raw Segmentation Output', output_predictions.astype(np.uint8) * 12)
     return labeled_frame
+
 
 def capture_video(video_source=0):
 
