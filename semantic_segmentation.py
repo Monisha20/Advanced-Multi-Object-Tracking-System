@@ -14,6 +14,12 @@ preprocess = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize as per model requirements
 ])
 
+CLASS_NAMES = [
+    'background', 'aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus',
+    'car', 'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse', 'motorbike',
+    'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor'
+]
+
 # Color mapping for segmentation classes
 LABEL_COLORS = np.random.randint(0, 255, size=(21, 3), dtype="uint8")
 
@@ -25,6 +31,24 @@ def decode_segmentation(segmentation_map):
     rgb_image = np.stack([r, g, b], axis=2)
     return rgb_image
 
+def add_labels_to_frame(segmentation_map, frame):
+    unique_classes = np.unique(segmentation_map)  # Find all the classes present in the frame
+    for cls in unique_classes:
+        if cls == 0:
+            continue  # Skip background
+        # Get the mask for the current class
+        mask = (segmentation_map == cls)
+        
+        # Find the centroid of the class mask to place the label
+        y, x = np.where(mask)
+        if len(x) > 0 and len(y) > 0:
+            centroid_x, centroid_y = np.mean(x), np.mean(y)
+            label = CLASS_NAMES[cls]
+            
+            # Overlay the label at the centroid
+            cv2.putText(frame, label, (int(centroid_x), int(centroid_y)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    
+    return frame
 # Open the input video using OpenCV
 video_path = "C:\\Users\\bindu\\Documents\\Monisha\\ML_Project\\Workspaces\\object_tracking_workspace\\input\\person-bicycle-car-detection.mp4"  # Replace with your video path
 cap = cv2.VideoCapture(video_path)
@@ -53,13 +77,15 @@ while cap.isOpened():
     decoded_segmentation = decode_segmentation(output_predictions)
 
     # Convert the decoded segmentation to uint8 (needed for writing to video)
-    decoded_segmentation = decoded_segmentation.astype(np.uint8)
+    #decoded_segmentation = decoded_segmentation.astype(np.uint8)
+
+    labeled_frame = add_labels_to_frame(output_predictions, decoded_segmentation)
 
     # Write the frame with segmentation into the output video
-    out.write(decoded_segmentation)
+    out.write(labeled_frame)
 
     # (Optional) Display the current frame with segmentation
-    cv2.imshow('Segmented Frame', decoded_segmentation)
+    cv2.imshow('Segmented Frame', labeled_frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):  # Press 'q' to quit early
         break
 
